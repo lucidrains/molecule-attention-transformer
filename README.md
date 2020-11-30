@@ -1,6 +1,6 @@
 ## Molecule Attention Transformer - Pytorch
 
-Pytorch reimplementation of Molecule Attention Transformer, which uses a transformer to tackle the graph-like structure of molecules.
+Pytorch reimplementation of Molecule Attention Transformer, which uses a slighly modified transformer to tackle the graph-like structure of molecules.
 
 ## Citations
 
