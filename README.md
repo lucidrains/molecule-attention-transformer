@@ -1,4 +1,4 @@
-## Molecule Attention Transformer - Pytorch
+## Molecule Attention Transformer - Pytorch (wip)
 
 Pytorch reimplementation of Molecule Attention Transformer, which uses a slightly modified transformer to tackle the graph-like structure of molecules.
 
