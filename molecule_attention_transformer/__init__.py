@@ -1,0 +1,1 @@
+from molecule_attention_transformer.molecule_attention_transformer import MAT

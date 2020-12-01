@@ -1,0 +1,157 @@
+import torch
+import torch.nn.functional as F
+from functools import partial
+from torch import nn, einsum
+from einops import rearrange
+
+# constants
+
+DEFAULT_DISTANCE_KERNEL = lambda t: torch.exp(-t)
+
+# helpers
+
+def exists(val):
+    return val is not None
+
+# helper classes
+
+class Residual(nn.Module):
+    def __init__(self, fn):
+        super().__init__()
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        return x + self.fn(x, **kwargs)
+
+class PreNorm(nn.Module):
+    def __init__(self, dim, fn):
+        super().__init__()
+        self.norm = nn.LayerNorm(dim)
+        self.fn = fn
+
+    def forward(self, x, **kwargs):
+        x = self.norm(x)
+        return self.fn(x, **kwargs)
+
+class FeedForward(nn.Module):
+    def __init__(self, dim, mult = 4):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(dim, dim * mult),
+            nn.GELU(),
+            nn.Linear(dim * mult, dim)
+        )
+
+    def forward(self, x):
+        return self.net(x)
+
+class Attention(nn.Module):
+    def __init__(self, dim, heads = 8, dim_head = 64, Lg = 0.5, Ld = 0.5, La = 1, distance_kernel = DEFAULT_DISTANCE_KERNEL):
+        super().__init__()
+        inner_dim = dim_head * heads
+        self.heads= heads
+        self.scale = dim_head ** -0.5
+        self.to_qkv = nn.Linear(dim, inner_dim * 3, bias = False)
+        self.to_out = nn.Linear(inner_dim, dim)
+
+        # hyperparameters controlling the weighted linear combination from
+        # self-attention (La)
+        # adjacency graph (Lg)
+        # pair-wise distance matrix (Ld)
+
+        self.La = La
+        self.Ld = Ld
+        self.Lg = Lg
+
+        self.distance_kernel = distance_kernel
+
+    def forward(self, x, mask = None, adjacency_mat = None, distance_mat = None):
+        h, La, Ld, Lg, distance_kernel = self.heads, self.La, self.Ld, self.Lg, self.distance_kernel
+
+        qkv = self.to_qkv(x)
+        q, k, v = rearrange(qkv, 'b n (h qkv d) -> b h n qkv d', h = h, qkv = 3).unbind(dim = -2)
+        dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+
+        if exists(distance_mat):
+            distance_mat = rearrange(distance_mat, 'b i j -> b () i j')
+
+        if exists(mask):
+            mask_value = torch.finfo(dots.dtype).max
+            mask = mask[:, None, :, None] * mask[:, None, None, :]
+
+            # mask attention
+            dots.masked_fill_(~mask, -mask_value)
+
+            # mask distance to infinity
+            # todo - make sure for softmax distance kernel, use -infinity
+            distance_mat.masked_fill_(~mask, mask_value)
+
+        attn = dots.softmax(dim = -1)
+
+        # sum contributions from adjacency and distance tensors
+        attn = attn * La
+
+        if exists(adjacency_mat):
+            attn = attn + Lg * rearrange(adjacency_mat, 'b i j -> b () i j')
+
+        if exists(distance_mat):
+            distance_mat = self.distance_kernel(distance_mat)
+            attn = attn + Ld * distance_mat
+
+        out = einsum('b h i j, b h j d -> b h i d', attn, v)
+        out = rearrange(out, 'b h n d -> b n (h d)')
+        return self.to_out(out)
+
+# main class
+
+class MAT(nn.Module):
+    def __init__(
+        self,
+        *,
+        dim_in,
+        model_dim,
+        dim_out,
+        depth,
+        heads = 8,
+        Lg = 0.5,
+        Ld = 0.5,
+        La = 1,
+        distance_kernel = DEFAULT_DISTANCE_KERNEL
+    ):
+        super().__init__()
+
+        self.embed_to_model = nn.Linear(dim_in, model_dim)
+        self.layers = nn.ModuleList([])
+
+        for _ in range(depth):
+            layer = nn.ModuleList([
+                Residual(PreNorm(model_dim, Attention(model_dim, heads = heads, Lg = Lg, Ld = Ld, La = La, distance_kernel = distance_kernel))),
+                Residual(PreNorm(model_dim, FeedForward(model_dim)))
+            ])
+            self.layers.append(layer)
+
+        self.norm_out = nn.LayerNorm(model_dim)
+        self.linear_out = nn.Linear(model_dim, dim_out)
+
+    def forward(
+        self,
+        x,
+        mask = None,
+        adjacency_mat = None,
+        distance_mat = None
+    ):
+        x = self.embed_to_model(x)
+
+        for (attn, ff) in self.layers:
+            x = attn(
+                x,
+                mask = mask,
+                adjacency_mat = adjacency_mat,
+                distance_mat = distance_mat
+            )
+            x = ff(x)
+
+        x = self.norm_out(x)
+        x = x.mean(dim = -2)
+        x = self.linear_out(x)
+        return x
