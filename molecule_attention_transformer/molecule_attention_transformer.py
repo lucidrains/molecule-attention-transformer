@@ -75,6 +75,9 @@ class Attention(nn.Module):
         if exists(distance_mat):
             distance_mat = rearrange(distance_mat, 'b i j -> b () i j')
 
+        if exists(adjacency_mat):
+            adjacency_mat = rearrange(adjacency_mat, 'b i j -> b () i j')
+
         if exists(mask):
             mask_value = torch.finfo(dots.dtype).max
             mask = mask[:, None, :, None] * mask[:, None, None, :]
@@ -82,9 +85,13 @@ class Attention(nn.Module):
             # mask attention
             dots.masked_fill_(~mask, -mask_value)
 
-            # mask distance to infinity
-            # todo - make sure for softmax distance kernel, use -infinity
-            distance_mat.masked_fill_(~mask, mask_value)
+            if exists(distance_mat):
+                # mask distance to infinity
+                # todo - make sure for softmax distance kernel, use -infinity
+                distance_mat.masked_fill_(~mask, mask_value)
+
+            if exists(adjacency_mat):
+                adjacency_mat.masked_fill_(~mask, 0.)
 
         attn = dots.softmax(dim = -1)
 
@@ -92,10 +99,10 @@ class Attention(nn.Module):
         attn = attn * La
 
         if exists(adjacency_mat):
-            attn = attn + Lg * rearrange(adjacency_mat, 'b i j -> b () i j')
+            attn = attn + Lg * adjacency_mat
 
         if exists(distance_mat):
-            distance_mat = self.distance_kernel(distance_mat)
+            distance_mat = distance_kernel(distance_mat)
             attn = attn + Ld * distance_mat
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
