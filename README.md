@@ -2,8 +2,9 @@
 
 ## Molecule Attention Transformer - Pytorch (wip)
 
-Pytorch reimplementation of <a href="https://arxiv.org/abs/2002.08264">Molecule Attention Transformer</a>, which uses a slightly modified transformer to tackle the graph-like structure of molecules. The repository is also meant to be educational, to understand the limitations of transformers for 
-processing graphs (or perhaps lack thereof).
+Pytorch reimplementation of <a href="https://arxiv.org/abs/2002.08264">Molecule Attention Transformer</a>, which uses a slightly modified transformer to tackle the graph-like structure of molecules. The repository is also meant to be educational, to understand the limitations of transformers for processing graphs (or perhaps lack thereof).
+
+Update: Reread the paper and results do look convincing. However, I do not like how it still takes hyperparameter sweeps of the relative contributions of the distance, adjacency, and self attention matrices to achieve good results. There must be more hands-off way
 
 ## Install
 
