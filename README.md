@@ -34,7 +34,7 @@ out = model(
     mask = mask,
     adjacency_mat = adjacency_mat,
     distance_mat = distance_mat
-)
+) # (2, 1)
 ```
 
 ## Citations
