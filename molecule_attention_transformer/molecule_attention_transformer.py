@@ -13,6 +13,9 @@ DEFAULT_DISTANCE_KERNEL = lambda t: torch.exp(-t)
 def exists(val):
     return val is not None
 
+def default(val, d):
+    return d if not exists(val) else val
+
 # helper classes
 
 class Residual(nn.Module):
@@ -34,12 +37,13 @@ class PreNorm(nn.Module):
         return self.fn(x, **kwargs)
 
 class FeedForward(nn.Module):
-    def __init__(self, dim, mult = 4):
+    def __init__(self, dim, dim_out = None, mult = 4):
         super().__init__()
+        dim_out = default(dim_out, dim)
         self.net = nn.Sequential(
             nn.Linear(dim, dim * mult),
             nn.GELU(),
-            nn.Linear(dim * mult, dim)
+            nn.Linear(dim * mult, dim_out)
         )
 
     def forward(self, x):
@@ -138,7 +142,7 @@ class MAT(nn.Module):
             self.layers.append(layer)
 
         self.norm_out = nn.LayerNorm(model_dim)
-        self.linear_out = nn.Linear(model_dim, dim_out)
+        self.ff_out = FeedForward(model_dim, dim_out)
 
     def forward(
         self,
@@ -160,5 +164,5 @@ class MAT(nn.Module):
 
         x = self.norm_out(x)
         x = x.mean(dim = -2)
-        x = self.linear_out(x)
+        x = self.ff_out(x)
         return x
