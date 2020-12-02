@@ -23,9 +23,10 @@ model = MAT(
     model_dim = 512,
     dim_out = 1,
     depth = 6,
-    Lg = 0.5,      # lambda (g)raph - weight for adjacency matrix
-    Ld = 0.5,      # lambda (d)istance - weight for distance matrix
-    La = 1         # lambda (a)ttention - weight for usual self-attention
+    Lg = 0.5,                   # lambda (g)raph - weight for adjacency matrix
+    Ld = 0.5,                   # lambda (d)istance - weight for distance matrix
+    La = 1,                     # lambda (a)ttention - weight for usual self-attention
+    dist_kernel_fn = 'exp'      # distance kernel fn - either 'exp' or 'softmax'
 )
 
 atoms           = torch.randn(2, 100, 26)

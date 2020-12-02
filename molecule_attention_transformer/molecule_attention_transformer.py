@@ -6,7 +6,16 @@ from einops import rearrange
 
 # constants
 
-DEFAULT_DISTANCE_KERNEL = lambda t: torch.exp(-t)
+DIST_KERNELS = {
+    'exp': {
+        'fn': lambda t: torch.exp(-t),
+        'mask_value_fn': lambda t: torch.finfo(t.dtype).max
+    },
+    'softmax': {
+        'fn': lambda t: torch.softmax(t, dim = -1),
+        'mask_value_fn': lambda t: -torch.finfo(t.dtype).max
+    }
+}
 
 # helpers
 
@@ -50,7 +59,7 @@ class FeedForward(nn.Module):
         return self.net(x)
 
 class Attention(nn.Module):
-    def __init__(self, dim, heads = 8, dim_head = 64, Lg = 0.5, Ld = 0.5, La = 1, distance_kernel = DEFAULT_DISTANCE_KERNEL):
+    def __init__(self, dim, heads = 8, dim_head = 64, Lg = 0.5, Ld = 0.5, La = 1, dist_kernel_fn = 'exp'):
         super().__init__()
         inner_dim = dim_head * heads
         self.heads= heads
@@ -67,14 +76,17 @@ class Attention(nn.Module):
         self.Ld = Ld
         self.Lg = Lg
 
-        self.distance_kernel = distance_kernel
+        self.dist_kernel_fn = dist_kernel_fn
 
     def forward(self, x, mask = None, adjacency_mat = None, distance_mat = None):
-        h, La, Ld, Lg, distance_kernel = self.heads, self.La, self.Ld, self.Lg, self.distance_kernel
+        h, La, Ld, Lg, dist_kernel_fn = self.heads, self.La, self.Ld, self.Lg, self.dist_kernel_fn
 
         qkv = self.to_qkv(x)
         q, k, v = rearrange(qkv, 'b n (h qkv d) -> b h n qkv d', h = h, qkv = 3).unbind(dim = -2)
         dots = einsum('b h i d, b h j d -> b h i j', q, k) * self.scale
+
+        assert dist_kernel_fn in DIST_KERNELS, f'distance kernel function needs to be one of {DISTANCE_KERNELS.keys()}'
+        dist_kernel_config = DIST_KERNELS[dist_kernel_fn]
 
         if exists(distance_mat):
             distance_mat = rearrange(distance_mat, 'b i j -> b () i j')
@@ -92,7 +104,8 @@ class Attention(nn.Module):
             if exists(distance_mat):
                 # mask distance to infinity
                 # todo - make sure for softmax distance kernel, use -infinity
-                distance_mat.masked_fill_(~mask, mask_value)
+                dist_mask_value = dist_kernel_config['mask_value_fn'](dots)
+                distance_mat.masked_fill_(~mask, dist_mask_value)
 
             if exists(adjacency_mat):
                 adjacency_mat.masked_fill_(~mask, 0.)
@@ -106,7 +119,7 @@ class Attention(nn.Module):
             attn = attn + Lg * adjacency_mat
 
         if exists(distance_mat):
-            distance_mat = distance_kernel(distance_mat)
+            distance_mat = dist_kernel_config['fn'](distance_mat)
             attn = attn + Ld * distance_mat
 
         out = einsum('b h i j, b h j d -> b h i d', attn, v)
@@ -127,7 +140,7 @@ class MAT(nn.Module):
         Lg = 0.5,
         Ld = 0.5,
         La = 1,
-        distance_kernel = DEFAULT_DISTANCE_KERNEL
+        dist_kernel_fn = 'exp'
     ):
         super().__init__()
 
@@ -136,7 +149,7 @@ class MAT(nn.Module):
 
         for _ in range(depth):
             layer = nn.ModuleList([
-                Residual(PreNorm(model_dim, Attention(model_dim, heads = heads, Lg = Lg, Ld = Ld, La = La, distance_kernel = distance_kernel))),
+                Residual(PreNorm(model_dim, Attention(model_dim, heads = heads, Lg = Lg, Ld = Ld, La = La, dist_kernel_fn = dist_kernel_fn))),
                 Residual(PreNorm(model_dim, FeedForward(model_dim)))
             ])
             self.layers.append(layer)
